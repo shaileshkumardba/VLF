@@ -1,0 +1,112 @@
+--Number of VLFs: If the transaction log file contains an excessive number of VLFs (e.g., tens of thousands or more), it may indicate VLF fragmentation.
+
+--VLF Size Disparity: Check for significant differences in VLF sizes. Ideally, VLFs should be evenly sized to ensure optimal transaction log performance.
+
+--Autogrowth Settings: Excessive autogrowth events can lead to VLF fragmentation. Monitor autogrowth events and consider adjusting autogrowth settings to prevent frequent small growths.
+
+--Regular Monitoring: Regularly monitor VLFs and transaction log performance metrics to identify any patterns or trends indicating potential fragmentation issues.
+
+--Maintenance Tasks: Consider performing regular transaction log maintenance tasks, such as shrinking and regrowing the transaction log file to consolidate VLFs and improve performance.
+
+
+
+
+--database_id- In Azure SQL Database, the values are unique within a single database or an elastic pool, but not within a logical server.
+--file_id	smallint	The file ID of the transaction log.
+--vlf_begin_offset	bigint	Offset location of the virtual log file (VLF) from the beginning of the transaction log file.
+--vlf_size_mb	float	virtual log file (VLF) size in MB, rounded to two decimal places.
+--vlf_sequence_number	bigint	virtual log file (VLF) sequence number in the created order. Used to uniquely identify VLFs in log file.
+--vlf_active	bit	Indicates whether virtual log file (VLF) is in use or not.
+--0 - VLF is not in use.
+--1 - VLF is active.
+--vlf_status	int	Status of the virtual log file (VLF). Possible values include
+--0 - VLF is inactive
+--1 - VLF is initialized but unused
+--2 - VLF is active.
+--vlf_parity	tinyint	Parity of virtual log file (VLF). Used internally to determine the end of log within a VLF.
+--vlf_first_lsn	nvarchar(48)	Log sequence number (LSN) of the first log record in the virtual log file (VLF).
+--vlf_create_lsn	nvarchar(48)	Log sequence number (LSN) of the log record that created the virtual log file (VLF).
+
+
+--recommended virtual file is 50 by microsoft or if database server crashes down, recovery time will be higer (max 500 to 1000)
+--Active VLF--Min LSN to Max LSN---
+--Fix VLF Problem
+--Backup TRN, checkpoint manually, no huge trn file is running, shrink log file to smaller size, regrowthe log file to larger size
+
+----
+
+--Autogrowth: When the transaction log file reaches its predefined size limit (either the maximum file size or the size specified by the autogrowth settings), SQL Server automatically grows the file by adding new VLFs. Autogrowth can occur in fixed-size increments or as a percentage of the current log file size.
+
+--Manual Resizing: Database administrators can manually resize transaction log files using ALTER DATABASE commands. If the transaction log file is manually resized to a larger size, SQL Server adds new VLFs to accommodate the increased file size.
+
+--To reduce the size of VLFs and optimize transaction log file management, you can take the following steps:
+
+--Adjust Autogrowth Settings: Review and adjust the autogrowth settings for the transaction log file to prevent excessive VLF growth and fragmentation. Consider setting a fixed growth increment instead of a percentage-based increment to ensure consistent VLF sizes. Additionally, set appropriate maximum file size limits to prevent log files from growing too large.
+
+--Resize Transaction Log Files: If the transaction log file has grown excessively and contains a large number of small VLFs, you can resize the file to consolidate VLFs and improve performance. Use the ALTER DATABASE command to shrink the transaction log file to a smaller size and then regrow it to the desired size. This process can help eliminate VLF fragmentation and optimize log file management.
+
+--Manage Autogrowth Events: Monitor autogrowth events for the transaction log file and address any frequent or excessive growth events. Regularly review log file growth patterns and adjust autogrowth settings as needed to minimize VLF fragmentation and maintain optimal log file sizes.
+
+--Perform Regular Log Backups: Regularly perform transaction log backups to keep the transaction log size manageable and prevent excessive VLF growth. Log backups mark VLFs as inactive, allowing them to be reused and preventing VLF fragmentation. Implement a regular log backup schedule based on the database workload to ensure timely log truncation and VLF reuse.
+
+--Implement Ongoing Monitoring: Implement ongoing monitoring of VLF-related metrics and performance indicators to proactively identify and address any emerging VLF issues. Use tools such as SQL Server Management Studio (SSMS) or third-party monitoring solutions to track VLF growth and fragmentation over time.
+
+
+--Performance Degradation: Managing a large number of VLFs can degrade performance, particularly during transaction log backup and restore operations. The larger the number of VLFs, the longer it takes for SQL Server to scan and process them, resulting in slower backup and restore times.
+
+--Slow Recovery: During database recovery operations (e.g., database startup, restore), SQL Server needs to process the transaction log, which involves scanning and applying changes recorded in the VLFs. A large number of VLFs can prolong the recovery process, leading to longer database downtime and slower recovery times.
+
+--Autogrowth Performance Impact: If autogrowth events continually add new VLFs to accommodate log file growth, it can impact overall performance due to the frequent resizing and allocation of VLFs. Excessive autogrowth events can also lead to VLF fragmentation, further exacerbating performance issues.
+
+--Backup and Restore Challenges: Managing backups and restores becomes more challenging with a large number of VLFs. Backup and restore operations may take longer to complete, and managing backup files may become more complex due to the increased number of VLFs.
+
+--Increased Maintenance Overhead: Maintenance tasks such as log file backups, log file monitoring, and log file management become more complex and resource-intensive with a large number of VLFs. Administrators may need to spend more time monitoring and managing VLFs to ensure optimal performance and stability.
+
+--Difficulty in Troubleshooting: Troubleshooting performance issues and diagnosing problems related to VLFs becomes more challenging with a large number of VLFs. Identifying fragmentation, determining the root cause of performance issues, and implementing corrective actions may require more time and effort.
+
+--Disk Space Wastage: In some cases, a large number of VLFs can result in wasted disk space due to inefficient space allocation and fragmentation. This can lead to increased storage costs and inefficient disk utilization.
+DBCC LOGINFO;
+
+select * from sys.dm_db_log_info ( 6 )  
+---A. Determine databases in a SQL Server instance with high number of VLFs
+
+
+SELECT [name], COUNT(l.database_id) AS 'vlf_count' 
+FROM sys.databases AS s
+CROSS APPLY sys.dm_db_log_info(s.database_id) AS l
+GROUP BY [name]
+HAVING COUNT(l.database_id) > 100;
+
+
+----VLF for all database
+SELECT [name] AS 'Database Name',
+COUNT(li.database_id) AS 'VLF Count',
+SUM(li.vlf_size_mb) AS 'VLF Size (MB)',
+SUM(CAST(li.vlf_active AS INT)) AS 'Active VLF',
+SUM(li.vlf_active*li.vlf_size_mb) AS 'Active VLF Size (MB)',
+COUNT(li.database_id)-SUM(CAST(li.vlf_active AS INT)) AS 'Inactive VLF',
+SUM(li.vlf_size_mb)-SUM(li.vlf_active*li.vlf_size_mb) AS 'Inactive VLF Size (MB)'
+FROM sys.databases s
+CROSS APPLY sys.dm_db_log_info(s.database_id) li
+GROUP BY [name]
+ORDER BY COUNT(li.database_id) DESC;
+
+---- Determine the position of the last VLF in transaction log before shrinking the log file
+;WITH cte_vlf AS (
+SELECT ROW_NUMBER() OVER(ORDER BY vlf_begin_offset) AS vlfid, DB_NAME(database_id) AS [Database Name], vlf_sequence_number, vlf_active, vlf_begin_offset, vlf_size_mb
+    FROM sys.dm_db_log_info(DEFAULT)),
+cte_vlf_cnt AS (SELECT [Database Name], COUNT(vlf_sequence_number) AS vlf_count,
+    (SELECT COUNT(vlf_sequence_number) FROM cte_vlf WHERE vlf_active = 0) AS vlf_count_inactive,
+    (SELECT COUNT(vlf_sequence_number) FROM cte_vlf WHERE vlf_active = 1) AS vlf_count_active,
+    (SELECT MIN(vlfid) FROM cte_vlf WHERE vlf_active = 1) AS ordinal_min_vlf_active,
+    (SELECT MIN(vlf_sequence_number) FROM cte_vlf WHERE vlf_active = 1) AS min_vlf_active,
+    (SELECT MAX(vlfid) FROM cte_vlf WHERE vlf_active = 1) AS ordinal_max_vlf_active,
+    (SELECT MAX(vlf_sequence_number) FROM cte_vlf WHERE vlf_active = 1) AS max_vlf_active
+    FROM cte_vlf
+    GROUP BY [Database Name])
+SELECT [Database Name], vlf_count, min_vlf_active, ordinal_min_vlf_active, max_vlf_active, ordinal_max_vlf_active,
+((ordinal_min_vlf_active-1)*100.00/vlf_count) AS free_log_pct_before_active_log,
+((ordinal_max_vlf_active-(ordinal_min_vlf_active-1))*100.00/vlf_count) AS active_log_pct,
+((vlf_count-ordinal_max_vlf_active)*100.00/vlf_count) AS free_log_pct_after_active_log
+FROM cte_vlf_cnt;
+GO
